@@ -1,0 +1,7 @@
+[package]
+name = "dfq-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dockerfile-parser = "0.9.0"
