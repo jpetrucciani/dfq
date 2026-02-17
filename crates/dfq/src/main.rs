@@ -1,7 +1,11 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
-use clap::{Parser, error::ErrorKind};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum, error::ErrorKind};
+use clap_complete::{
+    generate,
+    shells::{Bash, Fish, Zsh},
+};
 
 use dfq_core::Error;
 use dfq_core::eval::Evaluator;
@@ -51,6 +55,22 @@ impl From<Error> for AppError {
     }
 }
 
+#[derive(Debug, Subcommand)]
+enum Commands {
+    #[command(about = "Generate shell completion scripts")]
+    Completion {
+        #[arg(value_enum, value_name = "SHELL")]
+        shell: CompletionShell,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "dfq",
@@ -59,6 +79,9 @@ impl From<Error> for AppError {
     after_help = AFTER_HELP
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     #[arg(
         short = 'f',
         long = "file",
@@ -140,7 +163,7 @@ struct Cli {
         help = "Query expression",
         long_help = "Query expression to evaluate. Examples: ARG.VERSION, FROM[0].RESOLVED, STAGE[\"builder\"].ARG.VERSION, RUN[*], RUN.GREP(\"apt-get\"), RUN[*].GREP(\"apt-get\")."
     )]
-    query: String,
+    query: Option<String>,
 }
 
 fn run() -> Result<(), AppError> {
@@ -162,12 +185,19 @@ fn run() -> Result<(), AppError> {
 }
 
 fn execute(cli: Cli) -> Result<(), AppError> {
+    if let Some(command) = cli.command {
+        return execute_command(command);
+    }
+
     validate_cli(&cli)?;
     let _reserved_context = &cli.context;
 
     let dockerfile = read_dockerfile(&cli)?;
     let model = parse_dockerfile(&dockerfile)?;
-    let query = parse_query(&cli.query)?;
+    let query_source = cli.query.as_deref().ok_or_else(|| {
+        AppError::usage("the following required arguments were not provided:\n  <QUERY>")
+    })?;
+    let query = parse_query(query_source)?;
 
     let overrides = cli
         .build_args
@@ -210,6 +240,23 @@ fn execute(cli: Cli) -> Result<(), AppError> {
     }
 
     Err(AppError::usage("structured result requires --json"))
+}
+
+fn execute_command(command: Commands) -> Result<(), AppError> {
+    match command {
+        Commands::Completion { shell } => write_completion(shell),
+    }
+}
+
+fn write_completion(shell: CompletionShell) -> Result<(), AppError> {
+    let mut command = Cli::command();
+    let mut stdout = std::io::stdout().lock();
+    match shell {
+        CompletionShell::Bash => generate(Bash, &mut command, "dfq", &mut stdout),
+        CompletionShell::Zsh => generate(Zsh, &mut command, "dfq", &mut stdout),
+        CompletionShell::Fish => generate(Fish, &mut command, "dfq", &mut stdout),
+    }
+    stdout.flush().map_err(Error::from).map_err(AppError::from)
 }
 
 fn write_scalar_text(text: &str, raw: bool, nul: bool) -> Result<(), AppError> {
@@ -255,6 +302,11 @@ fn json_envelope(query: &str, value: Value, meta: Value) -> String {
 }
 
 fn validate_cli(cli: &Cli) -> Result<(), AppError> {
+    if cli.command.is_none() && cli.query.is_none() {
+        return Err(AppError::usage(
+            "the following required arguments were not provided:\n  <QUERY>",
+        ));
+    }
     if cli.stdin && cli.file.is_some() {
         return Err(AppError::usage("--stdin is mutually exclusive with --file"));
     }

@@ -440,12 +440,43 @@ fn readme_exit_codes_are_observable() {
 }
 
 #[test]
+fn bash_completion_is_emitted() {
+    let output = run(&["completion", "bash"]);
+    assert!(output.status.success());
+
+    let stdout = stdout_text(&output);
+    assert!(stdout.contains("_dfq()"));
+    assert!(stdout.contains("complete -F _dfq -o bashdefault -o default dfq"));
+}
+
+#[test]
+fn zsh_completion_is_emitted() {
+    let output = run(&["completion", "zsh"]);
+    assert!(output.status.success());
+
+    let stdout = stdout_text(&output);
+    assert!(stdout.contains("#compdef dfq"));
+    assert!(stdout.contains("_dfq \"$@\""));
+}
+
+#[test]
+fn fish_completion_is_emitted() {
+    let output = run(&["completion", "fish"]);
+    assert!(output.status.success());
+
+    let stdout = stdout_text(&output);
+    assert!(stdout.contains("complete -c dfq"));
+    assert!(stdout.contains("__fish_dfq_needs_command"));
+}
+
+#[test]
 fn help_contains_detailed_flag_and_query_docs() {
     let output = run(&["--help"]);
     assert!(output.status.success());
 
     let stdout = stdout_text(&output);
     assert!(stdout.contains("Parse a Dockerfile and query resolved values"));
+    assert!(stdout.contains("completion"));
     assert!(stdout.contains("Override ARG values"));
     assert!(stdout.contains("RUN[*] | grep apt-get"));
     assert!(stdout.contains("RUN[*].GREP(\"apt-get\")"));
